@@ -8,7 +8,7 @@ app = Flask(__name__)
 # IMPORTANT: Replace with your actual Gemini Enterprise base URL
 # This is the URL WITHOUT the dynamic session ID or specific path segments,
 # but INCLUDING the google.com/in/home/cid/353-4e92-ad35-47800f9a1c76 part
-BASE_URL = os.environ.get(
+GEMINI_ENTERPRISE_BASE_URL = os.environ.get(
     "GEMINI_ENTERPRISE_BASE_URL",
     "https://vertexaisearch.cloud.google/in/home/cid/f60333c4-d353-4e92-ad35-47800f9a1c76"
 )

@@ -18,8 +18,6 @@ COPY . .
 ENV PORT 8080
 EXPOSE $PORT
  
-# Run the application using Gunicorn, a production-ready WSGI HTTP server.
-# This makes the application more robust than running directly with Flask's development server.
-# The `wsgi:app` refers to the Flask app instance named `app` in your `main.py` file.
-# You might need to install gunicorn if not already in requirements.txt (add 'gunicorn' to it).
-CMD ["gunicorn", "--bind", "0.0.0.0:$(PORT)", "main:app"]
+# Run the application using Gunicorn.
+# Using the shell form of CMD to ensure $PORT is expanded correctly.
+CMD gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 main:app

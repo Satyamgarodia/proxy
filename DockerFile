@@ -1,0 +1,25 @@
+# Use the official Python image as a parent image.
+# We recommend a specific version to ensure consistency.
+FROM python:3.9-slim-buster
+ 
+# Set the working directory in the container.
+WORKDIR /app
+ 
+# Install production dependencies.
+# Copy requirements.txt first to leverage Docker's layer caching.
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+ 
+# Copy the rest of your application code.
+COPY . .
+ 
+# Expose the port that the application will listen on.
+# Cloud Run automatically sets the PORT environment variable.
+ENV PORT 8080
+EXPOSE $PORT
+ 
+# Run the application using Gunicorn, a production-ready WSGI HTTP server.
+# This makes the application more robust than running directly with Flask's development server.
+# The `wsgi:app` refers to the Flask app instance named `app` in your `main.py` file.
+# You might need to install gunicorn if not already in requirements.txt (add 'gunicorn' to it).
+CMD ["gunicorn", "--bind", "0.0.0.0:$(PORT)", "main:app"]

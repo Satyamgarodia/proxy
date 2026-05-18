@@ -23,8 +23,11 @@ CUSTOM_FRONTEND_DOMAIN = os.environ.get(
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 def proxy(path):
+    # Determine the current frontend domain dynamically
+    frontend_host = request.host
+    frontend_url = f"{request.scheme}://{frontend_host}"
+
     # Construct the full target URL for Gemini Enterprise
-    # Ensure no double slashes and include query parameters
     base_url_stripped = GEMINI_ENTERPRISE_BASE_URL.rstrip("/")
     if path:
         target_url = f"{base_url_stripped}/{path}"
@@ -37,12 +40,12 @@ def proxy(path):
     print(f"Proxying request: {request.method} {request.url} -> {target_url}")
  
     # Prepare headers for the request to the backend
-    # We MUST set the Host header to the backend's hostname for Google's security
     backend_hostname = GEMINI_ENTERPRISE_BASE_URL.replace("https://", "").split("/")[0]
     
     excluded_headers = [
         "host", "connection", "accept-encoding", "if-none-match",
-        "x-cloud-trace-context", "traceparent"
+        "x-cloud-trace-context", "traceparent", "x-forwarded-for", 
+        "x-forwarded-proto", "x-forwarded-host"
     ]
     headers = {
         key: value
@@ -50,11 +53,7 @@ def proxy(path):
         if key.lower() not in excluded_headers
     }
     headers["Host"] = backend_hostname
- 
-    # Add X-Forwarded-* headers (standard for proxies)
     headers["X-Forwarded-For"] = request.remote_addr
-    headers["X-Forwarded-Proto"] = request.scheme
-    headers["X-Forwarded-Host"] = request.host
  
     # Make the request to the Gemini Enterprise backend
     try:
@@ -72,25 +71,25 @@ def proxy(path):
         return Response(f"Proxy error: {e}", status=500)
  
     # --- Response Rewriting ---
-    # Prepare response headers for the client
     response_headers = []
-    full_backend_prefix_to_replace = GEMINI_ENTERPRISE_BASE_URL.replace("https://", "")
+    backend_domain = backend_hostname
  
     for key, value in resp_from_backend.headers.items():
-        # Exclude headers that might interfere or are backend-specific
         if key.lower() in ["transfer-encoding", "content-encoding", "content-length", "connection"]:
             continue
  
         # Rewrite Location header for redirects
         if key.lower() == "location":
-            new_location = value.replace(GEMINI_ENTERPRISE_BASE_URL, f"https://{CUSTOM_FRONTEND_DOMAIN}")
+            # Handle both direct and encoded occurrences of the backend URL
+            new_location = value.replace(GEMINI_ENTERPRISE_BASE_URL, frontend_url)
+            new_location = new_location.replace(backend_domain, frontend_host)
             print(f"Rewriting Location: {value} -> {new_location}")
             response_headers.append((key, new_location))
         # Rewrite Set-Cookie Domain
         elif key.lower() == "set-cookie":
-            # Attempt to replace the domain in the cookie
-            new_cookie = value.replace(full_backend_prefix_to_replace.split('/')[0], CUSTOM_FRONTEND_DOMAIN)
-            print(f"Rewriting Set-Cookie domain: {value} -> {new_cookie}")
+            new_cookie = value.replace(f"domain={backend_domain}", f"domain={frontend_host}")
+            new_cookie = new_cookie.replace(backend_domain, frontend_host)
+            # Remove 'Secure' flag if testing on http, but Cloud Run is https so it's fine
             response_headers.append((key, new_cookie))
         else:
             response_headers.append((key, value))
@@ -99,13 +98,14 @@ def proxy(path):
     def generate():
         for chunk in resp_from_backend.iter_content(chunk_size=8192):
             if chunk:
-                # This is a very basic rewrite for content.
-                # For complex JS/HTML that dynamically generates URLs,
-                # you might need a more sophisticated parser or regex.
-                # However, for simple string replacement in body, this works.
-                modified_chunk = chunk.decode('utf-8', errors='ignore')
-                modified_chunk = modified_chunk.replace(GEMINI_ENTERPRISE_BASE_URL, f"https://{CUSTOM_FRONTEND_DOMAIN}")
-                yield modified_chunk.encode('utf-8')
+                # Basic string replacement in body
+                try:
+                    modified_chunk = chunk.decode('utf-8', errors='ignore')
+                    modified_chunk = modified_chunk.replace(GEMINI_ENTERPRISE_BASE_URL, frontend_url)
+                    modified_chunk = modified_chunk.replace(backend_domain, frontend_host)
+                    yield modified_chunk.encode('utf-8')
+                except Exception:
+                    yield chunk
  
     return Response(
         stream_with_context(generate()),

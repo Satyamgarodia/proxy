@@ -24,25 +24,32 @@ CUSTOM_FRONTEND_DOMAIN = os.environ.get(
 @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
 def proxy(path):
     # Construct the full target URL for Gemini Enterprise
-    # The Load Balancer (later) will handle prepending the /in/home/cid... segment
-    # For now, Cloud Run will receive requests that *already* have this path component
-    # if you route directly or via a Load Balancer that does not strip it.
-    # We will assume the full path is being sent to Cloud Run for the internal request.
-    target_url = f"{GEMINI_ENTERPRISE_BASE_URL}/{path}"
+    # Ensure no double slashes and include query parameters
+    base_url_stripped = GEMINI_ENTERPRISE_BASE_URL.rstrip("/")
+    if path:
+        target_url = f"{base_url_stripped}/{path}"
+    else:
+        target_url = base_url_stripped
+        
+    if request.query_string:
+        target_url += f"?{request.query_string.decode('utf-8')}"
  
     print(f"Proxying request: {request.method} {request.url} -> {target_url}")
  
     # Prepare headers for the request to the backend
-    # Remove headers that might cause issues or are specific to the client connection
+    # We MUST set the Host header to the backend's hostname for Google's security
+    backend_hostname = GEMINI_ENTERPRISE_BASE_URL.replace("https://", "").split("/")[0]
+    
     excluded_headers = [
         "host", "connection", "accept-encoding", "if-none-match",
-        "x-cloud-trace-context", "traceparent", "user-agent" # User-agent can be passed if desired
+        "x-cloud-trace-context", "traceparent"
     ]
     headers = {
         key: value
         for key, value in request.headers.items()
         if key.lower() not in excluded_headers
     }
+    headers["Host"] = backend_hostname
  
     # Add X-Forwarded-* headers (standard for proxies)
     headers["X-Forwarded-For"] = request.remote_addr
@@ -55,10 +62,10 @@ def proxy(path):
             method=request.method,
             url=target_url,
             headers=headers,
-            data=request.get_data(), # Use get_data() for raw body
+            data=request.get_data(),
             cookies=request.cookies,
-            allow_redirects=False, # Crucial for manual Location header rewriting
-            stream=True # Stream the response for efficiency
+            allow_redirects=False,
+            stream=True
         )
     except requests.exceptions.RequestException as e:
         print(f"Error proxying request: {e}")

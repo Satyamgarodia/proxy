@@ -16,7 +16,7 @@ BASE_URL = os.environ.get(
 # Your desired custom domain (e.g., abc.com)
 CUSTOM_FRONTEND_DOMAIN = os.environ.get(
     "CUSTOM_FRONTEND_DOMAIN",
-    "gemini.airtel.com"
+    "abc.com"
 )
  
 # --- Proxy Logic ---
